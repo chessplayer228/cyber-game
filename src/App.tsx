@@ -43,13 +43,13 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'base' | 'quests' | 'profile' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
   const [isDonateOpen, setIsDonateOpen] = useState<boolean>(false);
 
-  // Character Skins State
+  // Character Skins State (Default is Operative Zero or Valkyrie)
   const [equippedSkinId, setEquippedSkinId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SKIN);
       if (saved) return saved;
     } catch {}
-    return 'skin_valkyrie_zero';
+    return 'skin_default_agent';
   });
 
   const [unlockedSkinIds, setUnlockedSkinIds] = useState<string[]>(() => {
@@ -60,7 +60,7 @@ export const App: React.FC = () => {
         if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
-    return ['skin_default_agent', 'skin_valkyrie_zero'];
+    return ['skin_default_agent'];
   });
 
   // Load saved faction
@@ -353,7 +353,6 @@ export const App: React.FC = () => {
           }
         });
       } else {
-        // Fallback for browser testing or direct confirm
         const confirmed = window.confirm(
           `Купить «${title}» за ${stars} ⭐️ Telegram Stars?\n(В Telegram откроется нативное окно оплаты)`
         );
@@ -366,16 +365,31 @@ export const App: React.FC = () => {
     }
   };
 
+  // Покупка эксклюзивных скинов за Звёзды (до 79 звезд)
   const handleBuySkinWithStars = (skin: SkinItem) => {
+    if (!skin.priceStars) return;
     triggerTelegramStarsPayment(
-      `Облик: ${skin.nameRu}`,
+      `Премиум Облик: ${skin.nameRu}`,
       skin.priceStars,
       () => {
         setUnlockedSkinIds((prev) => [...new Set([...prev, skin.id])]);
         setEquippedSkinId(skin.id);
-        alert(`Поздравляем! Облик «${skin.nameRu}» разблокирован и экипирован.`);
+        alert(`Поздравляем! Эксклюзивный облик «${skin.nameRu}» разблокирован.`);
       }
     );
+  };
+
+  // Покупка скинов за внутриигровую валюту (Кредиты)
+  const handleBuySkinWithCredits = (skin: SkinItem) => {
+    if (!skin.priceCredits || resources.credits < skin.priceCredits) return;
+
+    setResources((prev) => ({
+      ...prev,
+      credits: prev.credits - skin.priceCredits!,
+    }));
+    setUnlockedSkinIds((prev) => [...new Set([...prev, skin.id])]);
+    setEquippedSkinId(skin.id);
+    alert(`Успешно! Вы приобрели облик «${skin.nameRu}» за ${skin.priceCredits.toLocaleString()} кредитов.`);
   };
 
   const handleBuyDonatePackage = (pkg: DonatePackage) => {
@@ -476,12 +490,14 @@ export const App: React.FC = () => {
           <ProfileView
             equippedSkinId={equippedSkinId}
             unlockedSkinIds={unlockedSkinIds}
+            userCredits={resources.credits}
             lang={lang}
             playerAttackPower={185}
             playerDefensePower={160}
             playerReputation={340}
             onEquipSkin={(skinId) => setEquippedSkinId(skinId)}
             onBuySkinWithStars={handleBuySkinWithStars}
+            onBuySkinWithCredits={handleBuySkinWithCredits}
             onOpenDonateShop={() => setIsDonateOpen(true)}
           />
         )}
