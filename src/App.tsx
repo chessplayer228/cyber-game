@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { CommandBase } from './components/CommandBase';
-import { FactionsView } from './components/5MegacorpFactions';
+import { FactionSelection, FactionId } from './components/5MegacorpFactions';
 import { PvpMatchmakingView } from './components/PvpMatchmakingView';
-import { ClansView } from './components/ClansView';
+import { ClansView, useClansSystem } from './components/ClansView';
 import { HackingMinigame, HackingMinigameType } from './components/HackingMinigame';
 import { MOCK_RIVALS, PvpOpponent } from './components/PvpBattleModal';
 import { LanguageCode } from './utils/i18n';
 import {
-  initializeBuildings,
+  buildComplete30BuildingsState,
   calculateProductionMetrics,
   BuildingState,
   ResourceState,
@@ -22,12 +22,12 @@ import {
   Database,
   Cpu,
   Coins,
-  Globe,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [lang, setLang] = useState<LanguageCode>('ru');
   const [activeTab, setActiveTab] = useState<'base' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
+  const [selectedFaction, setSelectedFaction] = useState<FactionId>('aegis_security');
 
   const [resources, setResources] = useState<ResourceState>({
     energy: 500,
@@ -41,11 +41,32 @@ export const App: React.FC = () => {
     lastSyncedAt: Date.now(),
   });
 
-  const [buildings, setBuildings] = useState<BuildingState[]>(() => initializeBuildings());
+  const [buildings, setBuildings] = useState<BuildingState[]>(() => buildComplete30BuildingsState());
   const [unlockedDecor, setUnlockedDecor] = useState<string[]>(['rack-unit-01']);
   const [activeHackingOpponent, setActiveHackingOpponent] = useState<PvpOpponent | null>(null);
   const [activeHackingType, setActiveHackingType] = useState<HackingMinigameType>('icebreaker');
   const [nowMs, setNowMs] = useState<number>(Date.now());
+
+  // Integrated clans state hook
+  const {
+    clans,
+    activeClan,
+    joinClan,
+    leaveClan,
+    contributeToClanTreasury,
+    createNewClan,
+  } = useClansSystem({
+    username: 'Operator_Zero',
+    playerReputation: 120,
+    playerCredits: resources.credits,
+    onDeductCredits: (amount: number) => {
+      setResources((prev) => ({
+        ...prev,
+        credits: Math.max(0, prev.credits - amount),
+      }));
+    },
+    onGrantReputation: () => {},
+  });
 
   // Passive production ticker
   useEffect(() => {
@@ -58,10 +79,10 @@ export const App: React.FC = () => {
         if (deltaSec < 1) return prev;
 
         const metrics = calculateProductionMetrics(buildings);
-        const energyGain = (metrics.energyPerHour / 3600) * deltaSec;
-        const dataGain = (metrics.dataPerHour / 3600) * deltaSec;
-        const cryptoGain = (metrics.cryptoPerHour / 3600) * deltaSec;
-        const creditsGain = (metrics.creditsPerHour / 3600) * deltaSec;
+        const energyGain = (metrics.ratesPerHour.energy / 3600) * deltaSec;
+        const dataGain = (metrics.ratesPerHour.data / 3600) * deltaSec;
+        const cryptoGain = (metrics.ratesPerHour.crypto / 3600) * deltaSec;
+        const creditsGain = (metrics.ratesPerHour.credits / 3600) * deltaSec;
 
         return {
           ...prev,
@@ -165,7 +186,7 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setLang((l) => (l === 'ru' ? 'en' : 'ru'))}
-            className="ml-2 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 hover:text-white"
+            className="ml-2 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 hover:text-white cursor-pointer"
           >
             {lang.toUpperCase()}
           </button>
@@ -195,10 +216,10 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'factions' && (
-          <FactionsView
-            selectedFactionId="aegis_security"
+          <FactionSelection
+            selectedFaction={selectedFaction}
             lang={lang}
-            onSelectFaction={() => {}}
+            onSelectFaction={(factionId) => setSelectedFaction(factionId)}
           />
         )}
 
@@ -215,11 +236,13 @@ export const App: React.FC = () => {
 
         {activeTab === 'clans' && (
           <ClansView
-            currentClan={null}
-            userCredits={resources.credits}
-            onJoinClan={() => {}}
-            onCreateClan={() => {}}
-            onDonateCredits={() => {}}
+            clans={clans}
+            activeClan={activeClan}
+            playerCredits={resources.credits}
+            onJoinClan={joinClan}
+            onLeaveClan={leaveClan}
+            onContributeCredits={contributeToClanTreasury}
+            onCreateClan={createNewClan}
           />
         )}
 
@@ -254,7 +277,7 @@ export const App: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex flex-col items-center justify-center py-1 transition-colors ${
+                className={`flex flex-col items-center justify-center py-1 transition-colors cursor-pointer ${
                   isActive ? 'text-zinc-100 font-semibold' : 'text-zinc-500 hover:text-zinc-400'
                 }`}
               >
