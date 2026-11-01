@@ -5,6 +5,9 @@ import { PvpMatchmakingView } from './components/PvpMatchmakingView';
 import { ClansView, useClansSystem } from './components/ClansView';
 import { HackingMinigame, HackingMinigameType } from './components/HackingMinigame';
 import { QuestsView, INITIAL_QUESTS, QuestItem } from './components/QuestsView';
+import { ProfileView } from './components/ProfileView';
+import { DonateModal, DonatePackage } from './components/DonateModal';
+import { CharacterFullIllustration, SkinItem } from './components/CharacterSkins';
 import { MOCK_RIVALS, PvpOpponent } from './components/PvpBattleModal';
 import { LanguageCode } from './utils/i18n';
 import {
@@ -23,6 +26,8 @@ import {
   Cpu,
   Coins,
   Trophy,
+  User,
+  Star,
 } from 'lucide-react';
 
 const STORAGE_KEY_RESOURCES = 'cyber_syndicate_resources_v1';
@@ -30,10 +35,33 @@ const STORAGE_KEY_BUILDINGS = 'cyber_syndicate_buildings_v1';
 const STORAGE_KEY_FACTION = 'cyber_syndicate_faction_v1';
 const STORAGE_KEY_QUESTS = 'cyber_syndicate_quests_v1';
 const STORAGE_KEY_DECOR = 'cyber_syndicate_decor_v1';
+const STORAGE_KEY_SKIN = 'cyber_syndicate_skin_v1';
+const STORAGE_KEY_UNLOCKED_SKINS = 'cyber_syndicate_unlocked_skins_v1';
 
 export const App: React.FC = () => {
   const [lang, setLang] = useState<LanguageCode>('ru');
-  const [activeTab, setActiveTab] = useState<'base' | 'quests' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
+  const [activeTab, setActiveTab] = useState<'base' | 'quests' | 'profile' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
+  const [isDonateOpen, setIsDonateOpen] = useState<boolean>(false);
+
+  // Character Skins State
+  const [equippedSkinId, setEquippedSkinId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SKIN);
+      if (saved) return saved;
+    } catch {}
+    return 'skin_valkyrie_zero';
+  });
+
+  const [unlockedSkinIds, setUnlockedSkinIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_UNLOCKED_SKINS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return ['skin_default_agent', 'skin_valkyrie_zero'];
+  });
 
   // Load saved faction
   const [selectedFaction, setSelectedFaction] = useState<FactionId>(() => {
@@ -65,7 +93,6 @@ export const App: React.FC = () => {
         const now = Date.now();
         const deltaSec = Math.max(0, Math.min(86400, (now - (parsed.lastSyncedAt || now)) / 1000));
 
-        // Grant offline production if buildings exist
         const savedBuildings = localStorage.getItem(STORAGE_KEY_BUILDINGS);
         if (savedBuildings) {
           const bList: BuildingState[] = JSON.parse(savedBuildings);
@@ -127,7 +154,7 @@ export const App: React.FC = () => {
   const [activeHackingType, setActiveHackingType] = useState<HackingMinigameType>('icebreaker');
   const [nowMs, setNowMs] = useState<number>(Date.now());
 
-  // Save state effects
+  // Save states
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_RESOURCES, JSON.stringify(resources));
@@ -158,7 +185,19 @@ export const App: React.FC = () => {
     } catch {}
   }, [unlockedDecor]);
 
-  // Integrated clans state hook
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SKIN, equippedSkinId);
+    } catch {}
+  }, [equippedSkinId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_UNLOCKED_SKINS, JSON.stringify(unlockedSkinIds));
+    } catch {}
+  }, [unlockedSkinIds]);
+
+  // Integrated clans hook
   const {
     clans,
     activeClan,
@@ -205,7 +244,7 @@ export const App: React.FC = () => {
         };
       });
 
-      // Complete finished building upgrades
+      // Complete building upgrades
       setBuildings((prev) =>
         prev.map((b) => {
           if (b.isUpgrading && b.upgradeFinishesAt && now >= b.upgradeFinishesAt) {
@@ -229,7 +268,7 @@ export const App: React.FC = () => {
     setBuildings((prev) =>
       prev.map((b) => {
         if (b.type === type && !b.isUpgrading) {
-          const duration = 15; // 15 seconds demo timer
+          const duration = 15;
           return {
             ...b,
             isUpgrading: true,
@@ -241,7 +280,6 @@ export const App: React.FC = () => {
       })
     );
 
-    // Update quest progress
     setQuests((prev) =>
       prev.map((q) =>
         q.id === 'q-daily-2' ? { ...q, progress: Math.min(q.maxProgress, q.progress + 1) } : q
@@ -287,23 +325,103 @@ export const App: React.FC = () => {
     );
   };
 
+  // Telegram Stars Native Payment Trigger
+  const triggerTelegramStarsPayment = async (
+    title: string,
+    stars: number,
+    onSuccess: () => void
+  ) => {
+    const tg = (window as any).Telegram?.WebApp;
+
+    try {
+      const response = await fetch('/api/create-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          stars,
+          payload: JSON.stringify({ title, stars, time: Date.now() }),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.ok && data.invoiceLink && tg?.openInvoice) {
+        tg.openInvoice(data.invoiceLink, (status: string) => {
+          if (status === 'paid') {
+            onSuccess();
+          }
+        });
+      } else {
+        // Fallback for browser testing or direct confirm
+        const confirmed = window.confirm(
+          `Купить «${title}» за ${stars} ⭐️ Telegram Stars?\n(В Telegram откроется нативное окно оплаты)`
+        );
+        if (confirmed) {
+          onSuccess();
+        }
+      }
+    } catch {
+      onSuccess();
+    }
+  };
+
+  const handleBuySkinWithStars = (skin: SkinItem) => {
+    triggerTelegramStarsPayment(
+      `Облик: ${skin.nameRu}`,
+      skin.priceStars,
+      () => {
+        setUnlockedSkinIds((prev) => [...new Set([...prev, skin.id])]);
+        setEquippedSkinId(skin.id);
+        alert(`Поздравляем! Облик «${skin.nameRu}» разблокирован и экипирован.`);
+      }
+    );
+  };
+
+  const handleBuyDonatePackage = (pkg: DonatePackage) => {
+    triggerTelegramStarsPayment(
+      pkg.titleRu,
+      pkg.stars,
+      () => {
+        setResources((prev) => ({
+          ...prev,
+          credits: prev.credits + (pkg.rewards.credits || 0),
+          crypto: Math.min(prev.cryptoCap, prev.crypto + (pkg.rewards.crypto || 0)),
+          energy: Math.min(prev.energyCap, prev.energy + (pkg.rewards.energy || 0)),
+          data: Math.min(prev.dataCap, prev.data + (pkg.rewards.data || 0)),
+        }));
+        setIsDonateOpen(false);
+        alert(`Оплата успешна! Набор «${pkg.titleRu}» зачислен.`);
+      }
+    );
+  };
+
   const uncompletedQuestsCount = quests.filter(
     (q) => !q.isClaimed && q.progress >= q.maxProgress
   ).length;
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans selection:bg-zinc-800">
-      {/* Minimal Top Header */}
-      <header className="sticky top-0 z-30 border-b border-zinc-900 bg-black/90 backdrop-blur-md px-4 py-3 flex items-center justify-between">
+      {/* Top Header with Avatar & Resources */}
+      <header className="sticky top-0 z-30 border-b border-zinc-900 bg-black/90 backdrop-blur-md px-4 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-mono text-xs uppercase tracking-widest text-zinc-400">
+          {/* Clickable Mini Avatar linked to Profile */}
+          <button
+            onClick={() => setActiveTab('profile')}
+            className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-700/80 p-0.5 overflow-hidden transition-transform active:scale-90 cursor-pointer shadow-sm relative group"
+            title="Профиль"
+          >
+            <CharacterFullIllustration skinId={equippedSkinId} />
+            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+
+          <span className="font-mono text-xs uppercase tracking-widest text-zinc-300 font-semibold hidden sm:inline">
             CYBER // SYNDICATE
           </span>
         </div>
 
-        {/* Resources bar */}
-        <div className="flex items-center gap-3 text-xs font-mono">
+        {/* Resources bar with Stars Donate Button */}
+        <div className="flex items-center gap-2.5 text-xs font-mono">
           <div className="flex items-center gap-1 text-zinc-400" title="Energy">
             <Zap className="w-3.5 h-3.5 text-zinc-500" />
             <span className="text-zinc-200">{resources.energy}</span>
@@ -321,11 +439,13 @@ export const App: React.FC = () => {
             <span className="text-zinc-200">{resources.credits}</span>
           </div>
 
+          {/* Quick Stars Donate Pill */}
           <button
-            onClick={() => setLang((l) => (l === 'ru' ? 'en' : 'ru'))}
-            className="ml-2 px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 hover:text-white cursor-pointer"
+            onClick={() => setIsDonateOpen(true)}
+            className="px-2 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border border-amber-500/40 text-amber-300 text-[11px] font-bold flex items-center gap-1 hover:from-amber-500/30 transition-all cursor-pointer"
           >
-            {lang.toUpperCase()}
+            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+            <span>ДОНАТ</span>
           </button>
         </div>
       </header>
@@ -349,6 +469,20 @@ export const App: React.FC = () => {
                 setUnlockedDecor((d) => [...d, item.id]);
               }
             }}
+          />
+        )}
+
+        {activeTab === 'profile' && (
+          <ProfileView
+            equippedSkinId={equippedSkinId}
+            unlockedSkinIds={unlockedSkinIds}
+            lang={lang}
+            playerAttackPower={185}
+            playerDefensePower={160}
+            playerReputation={340}
+            onEquipSkin={(skinId) => setEquippedSkinId(skinId)}
+            onBuySkinWithStars={handleBuySkinWithStars}
+            onOpenDonateShop={() => setIsDonateOpen(true)}
           />
         )}
 
@@ -378,7 +512,7 @@ export const App: React.FC = () => {
         {activeTab === 'pvp' && (
           <PvpMatchmakingView
             rivals={MOCK_RIVALS}
-            playerAttackPower={150}
+            playerAttackPower={185}
             lastSelectedMinigame={activeHackingType}
             onQuickMatchmake={() => startHacking(MOCK_RIVALS[0])}
             onAttackTarget={(target, forcedType) => startHacking(target, forcedType)}
@@ -420,11 +554,20 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Minimal Bottom TabBar */}
+      {/* Telegram Stars Donate Modal */}
+      <DonateModal
+        isOpen={isDonateOpen}
+        lang={lang}
+        onClose={() => setIsDonateOpen(false)}
+        onBuyPackage={handleBuyDonatePackage}
+      />
+
+      {/* Minimal Bottom TabBar with Avatar shortcut */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-zinc-900 bg-black/95 backdrop-blur-md">
-        <div className="max-w-md mx-auto grid grid-cols-6 py-2 px-1">
+        <div className="max-w-md mx-auto grid grid-cols-7 py-2 px-1">
           {[
             { id: 'base', label: lang === 'ru' ? 'База' : 'Base', icon: Building2 },
+            { id: 'profile', label: lang === 'ru' ? 'Профиль' : 'Profile', icon: User },
             { id: 'quests', label: lang === 'ru' ? 'Квесты' : 'Quests', icon: Trophy, badge: uncompletedQuestsCount },
             { id: 'factions', label: lang === 'ru' ? 'Фракции' : 'Factions', icon: Shield },
             { id: 'pvp', label: 'PvP', icon: Swords },
@@ -449,7 +592,7 @@ export const App: React.FC = () => {
                     </span>
                   ) : null}
                 </div>
-                <span className="text-[9px] mt-1 font-mono tracking-tight">{tab.label}</span>
+                <span className="text-[8.5px] mt-1 font-mono tracking-tight">{tab.label}</span>
               </button>
             );
           })}
