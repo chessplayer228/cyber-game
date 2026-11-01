@@ -4,6 +4,7 @@ import { FactionSelection, FactionId } from './components/5MegacorpFactions';
 import { PvpMatchmakingView } from './components/PvpMatchmakingView';
 import { ClansView, useClansSystem } from './components/ClansView';
 import { HackingMinigame, HackingMinigameType } from './components/HackingMinigame';
+import { QuestsView, INITIAL_QUESTS, QuestItem } from './components/QuestsView';
 import { MOCK_RIVALS, PvpOpponent } from './components/PvpBattleModal';
 import { LanguageCode } from './utils/i18n';
 import {
@@ -22,11 +23,12 @@ import {
   Database,
   Cpu,
   Coins,
+  Trophy,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [lang, setLang] = useState<LanguageCode>('ru');
-  const [activeTab, setActiveTab] = useState<'base' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
+  const [activeTab, setActiveTab] = useState<'base' | 'quests' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
   const [selectedFaction, setSelectedFaction] = useState<FactionId>('aegis_security');
 
   const [resources, setResources] = useState<ResourceState>({
@@ -46,6 +48,7 @@ export const App: React.FC = () => {
   const [activeHackingOpponent, setActiveHackingOpponent] = useState<PvpOpponent | null>(null);
   const [activeHackingType, setActiveHackingType] = useState<HackingMinigameType>('icebreaker');
   const [nowMs, setNowMs] = useState<number>(Date.now());
+  const [quests, setQuests] = useState<QuestItem[]>(() => INITIAL_QUESTS);
 
   // Integrated clans state hook
   const {
@@ -129,6 +132,13 @@ export const App: React.FC = () => {
         return b;
       })
     );
+
+    // Update quest progress
+    setQuests((prev) =>
+      prev.map((q) =>
+        q.id === 'q-daily-2' ? { ...q, progress: Math.min(q.maxProgress, q.progress + 1) } : q
+      )
+    );
   };
 
   const handleSkipBuildingTimer = (type: string) => {
@@ -153,6 +163,25 @@ export const App: React.FC = () => {
     setActiveHackingType(gameType || 'icebreaker');
     setActiveTab('hack');
   };
+
+  const handleClaimQuest = (questId: string) => {
+    const quest = quests.find((q) => q.id === questId);
+    if (!quest || quest.isClaimed || quest.progress < quest.maxProgress) return;
+
+    setResources((prev) => ({
+      ...prev,
+      credits: prev.credits + quest.rewardCredits,
+      data: Math.min(prev.dataCap, prev.data + quest.rewardData),
+    }));
+
+    setQuests((prev) =>
+      prev.map((q) => (q.id === questId ? { ...q, isClaimed: true } : q))
+    );
+  };
+
+  const uncompletedQuestsCount = quests.filter(
+    (q) => !q.isClaimed && q.progress >= q.maxProgress
+  ).length;
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans selection:bg-zinc-800">
@@ -215,11 +244,26 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === 'quests' && (
+          <QuestsView
+            quests={quests}
+            lang={lang}
+            onClaimQuestReward={handleClaimQuest}
+          />
+        )}
+
         {activeTab === 'factions' && (
           <FactionSelection
             selectedFaction={selectedFaction}
             lang={lang}
-            onSelectFaction={(factionId) => setSelectedFaction(factionId)}
+            onSelectFaction={(factionId) => {
+              setSelectedFaction(factionId);
+              setQuests((prev) =>
+                prev.map((q) =>
+                  q.id === 'q-story-2' ? { ...q, progress: 1 } : q
+                )
+              );
+            }}
           />
         )}
 
@@ -253,6 +297,13 @@ export const App: React.FC = () => {
             onComplete={(victory) => {
               if (victory) {
                 setResources((r) => ({ ...r, credits: r.credits + 250, data: r.data + 150 }));
+                setQuests((prev) =>
+                  prev.map((q) => {
+                    if (q.id === 'q-daily-1') return { ...q, progress: 1 };
+                    if (q.id === 'q-milestone-1') return { ...q, progress: Math.min(q.maxProgress, q.progress + 1) };
+                    return q;
+                  })
+                );
               }
               setActiveTab('pvp');
             }}
@@ -261,11 +312,12 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Minimal Bottom TabBar */}
+      {/* Minimal Bottom TabBar with Quests notification badge */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-zinc-900 bg-black/95 backdrop-blur-md">
-        <div className="max-w-md mx-auto grid grid-cols-5 py-2 px-2">
+        <div className="max-w-md mx-auto grid grid-cols-6 py-2 px-1">
           {[
             { id: 'base', label: lang === 'ru' ? 'База' : 'Base', icon: Building2 },
+            { id: 'quests', label: lang === 'ru' ? 'Квесты' : 'Quests', icon: Trophy, badge: uncompletedQuestsCount },
             { id: 'factions', label: lang === 'ru' ? 'Фракции' : 'Factions', icon: Shield },
             { id: 'pvp', label: 'PvP', icon: Swords },
             { id: 'clans', label: lang === 'ru' ? 'Кланы' : 'Clans', icon: Users },
@@ -277,12 +329,19 @@ export const App: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex flex-col items-center justify-center py-1 transition-colors cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center py-1 transition-colors cursor-pointer ${
                   isActive ? 'text-zinc-100 font-semibold' : 'text-zinc-500 hover:text-zinc-400'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'stroke-[2.2]' : 'stroke-[1.5]'}`} />
-                <span className="text-[10px] mt-1 font-mono tracking-tight">{tab.label}</span>
+                <div className="relative">
+                  <Icon className={`w-4 h-4 ${isActive ? 'stroke-[2.2]' : 'stroke-[1.5]'}`} />
+                  {tab.badge && tab.badge > 0 ? (
+                    <span className="absolute -top-1 -right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-[8px] font-bold text-black">
+                      {tab.badge}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="text-[9px] mt-1 font-mono tracking-tight">{tab.label}</span>
               </button>
             );
           })}
