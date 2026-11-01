@@ -14,7 +14,6 @@ import {
   ResourceState,
 } from './utils/idleResourceEngine';
 import {
-  Terminal,
   Shield,
   Swords,
   Users,
@@ -26,29 +25,138 @@ import {
   Trophy,
 } from 'lucide-react';
 
+const STORAGE_KEY_RESOURCES = 'cyber_syndicate_resources_v1';
+const STORAGE_KEY_BUILDINGS = 'cyber_syndicate_buildings_v1';
+const STORAGE_KEY_FACTION = 'cyber_syndicate_faction_v1';
+const STORAGE_KEY_QUESTS = 'cyber_syndicate_quests_v1';
+const STORAGE_KEY_DECOR = 'cyber_syndicate_decor_v1';
+
 export const App: React.FC = () => {
   const [lang, setLang] = useState<LanguageCode>('ru');
   const [activeTab, setActiveTab] = useState<'base' | 'quests' | 'factions' | 'pvp' | 'clans' | 'hack'>('base');
-  const [selectedFaction, setSelectedFaction] = useState<FactionId>('aegis_security');
 
-  const [resources, setResources] = useState<ResourceState>({
-    energy: 500,
-    data: 450,
-    crypto: 200,
-    credits: 1200,
-    energyCap: 2000,
-    dataCap: 2000,
-    cryptoCap: 1000,
-    creditsCap: 10000,
-    lastSyncedAt: Date.now(),
+  // Load saved faction
+  const [selectedFaction, setSelectedFaction] = useState<FactionId>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_FACTION);
+      if (saved) return saved as FactionId;
+    } catch {}
+    return 'aegis_security';
   });
 
-  const [buildings, setBuildings] = useState<BuildingState[]>(() => buildComplete30BuildingsState());
-  const [unlockedDecor, setUnlockedDecor] = useState<string[]>(['rack-unit-01']);
+  // Load saved resources with offline calculation
+  const [resources, setResources] = useState<ResourceState>(() => {
+    const defaultRes: ResourceState = {
+      energy: 500,
+      data: 450,
+      crypto: 200,
+      credits: 1200,
+      energyCap: 2000,
+      dataCap: 2000,
+      cryptoCap: 1000,
+      creditsCap: 10000,
+      lastSyncedAt: Date.now(),
+    };
+
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_RESOURCES);
+      if (saved) {
+        const parsed: ResourceState = JSON.parse(saved);
+        const now = Date.now();
+        const deltaSec = Math.max(0, Math.min(86400, (now - (parsed.lastSyncedAt || now)) / 1000));
+
+        // Grant offline production if buildings exist
+        const savedBuildings = localStorage.getItem(STORAGE_KEY_BUILDINGS);
+        if (savedBuildings) {
+          const bList: BuildingState[] = JSON.parse(savedBuildings);
+          const metrics = calculateProductionMetrics(bList);
+          return {
+            ...parsed,
+            energy: Math.min(parsed.energyCap, Math.round(parsed.energy + (metrics.ratesPerHour.energy / 3600) * deltaSec)),
+            data: Math.min(parsed.dataCap, Math.round(parsed.data + (metrics.ratesPerHour.data / 3600) * deltaSec)),
+            crypto: Math.min(parsed.cryptoCap, Math.round(parsed.crypto + (metrics.ratesPerHour.crypto / 3600) * deltaSec)),
+            credits: Math.min(parsed.creditsCap, Math.round(parsed.credits + (metrics.ratesPerHour.credits / 3600) * deltaSec)),
+            lastSyncedAt: now,
+          };
+        }
+        return { ...parsed, lastSyncedAt: now };
+      }
+    } catch {}
+    return defaultRes;
+  });
+
+  // Load saved buildings
+  const [buildings, setBuildings] = useState<BuildingState[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_BUILDINGS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return buildComplete30BuildingsState(parsed);
+        }
+      }
+    } catch {}
+    return buildComplete30BuildingsState();
+  });
+
+  // Load saved decor
+  const [unlockedDecor, setUnlockedDecor] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_DECOR);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return ['rack-unit-01'];
+  });
+
+  // Load saved quests
+  const [quests, setQuests] = useState<QuestItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QUESTS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_QUESTS;
+  });
+
   const [activeHackingOpponent, setActiveHackingOpponent] = useState<PvpOpponent | null>(null);
   const [activeHackingType, setActiveHackingType] = useState<HackingMinigameType>('icebreaker');
   const [nowMs, setNowMs] = useState<number>(Date.now());
-  const [quests, setQuests] = useState<QuestItem[]>(() => INITIAL_QUESTS);
+
+  // Save state effects
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_RESOURCES, JSON.stringify(resources));
+    } catch {}
+  }, [resources]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_BUILDINGS, JSON.stringify(buildings));
+    } catch {}
+  }, [buildings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_FACTION, selectedFaction);
+    } catch {}
+  }, [selectedFaction]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_QUESTS, JSON.stringify(quests));
+    } catch {}
+  }, [quests]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_DECOR, JSON.stringify(unlockedDecor));
+    } catch {}
+  }, [unlockedDecor]);
 
   // Integrated clans state hook
   const {
@@ -312,7 +420,7 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Minimal Bottom TabBar with Quests notification badge */}
+      {/* Minimal Bottom TabBar */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-zinc-900 bg-black/95 backdrop-blur-md">
         <div className="max-w-md mx-auto grid grid-cols-6 py-2 px-1">
           {[
